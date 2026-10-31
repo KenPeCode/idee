@@ -1,0 +1,124 @@
+<!doctype html>
+<!-- Logs an idea from the phone into a topics sync repo: one file <repo>/_inbox/<time>.txt over the GitHub API.
+     The dashboard lists them and hands them to /topic-idea. Static and secret-free: the token lives only in this
+     browser (localStorage). Published as index.html of a public GitHub Pages repo; the source stays here. -->
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#4f46e5">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Idee loggen</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💡</text></svg>">
+<style>
+:root{--bg:#f6f7fb;--panel:#fff;--text:#1d2130;--muted:#6b7185;--border:#dfe2ec;--accent:#4f46e5;--on-accent:#fff;--ok:#15803d;--bad:#b91c1c;color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12141c;--panel:#1b1e29;--text:#e7e9f1;--muted:#9aa0b4;--border:#2c3040;--accent:#818cf8;--on-accent:#12141c;--ok:#4ade80;--bad:#f87171;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#12141c;--panel:#1b1e29;--text:#e7e9f1;--muted:#9aa0b4;--border:#2c3040;--accent:#818cf8;--on-accent:#12141c;--ok:#4ade80;--bad:#f87171;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:560px;margin:0 auto;padding:20px 16px calc(24px + env(safe-area-inset-bottom))}
+h1{font-size:20px;margin:4px 0 16px;display:flex;align-items:center;gap:8px}
+h1 button{margin-left:auto}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:16px}
+textarea,input{width:100%;font:inherit;color:inherit;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px}
+textarea{min-height:38vh;resize:vertical}
+textarea:focus,input:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:transparent}
+.ctx{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+.ctx button{flex:1;min-width:110px}
+button{font:inherit;font-weight:600;border-radius:10px;border:1px solid var(--border);background:var(--panel);color:var(--text);padding:12px 14px;cursor:pointer}
+button.on,button.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+button.primary{width:100%;font-size:17px}
+button.link{border:0;background:none;color:var(--muted);font-weight:500;padding:6px}
+button:disabled{opacity:.55}
+.msg{min-height:1.4em;margin-top:12px;font-size:14px;color:var(--muted)}
+.msg.ok{color:var(--ok)} .msg.bad{color:var(--bad)}
+label{display:block;font-weight:600;margin:0 0 6px}
+p.help{color:var(--muted);font-size:14px;margin:8px 0 14px}
+ol{padding-left:20px;margin:0 0 14px;color:var(--muted);font-size:14px}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+  <h1>💡 Idee loggen <button class="link" id="setBtn" type="button" hidden>Instellingen</button></h1>
+
+  <form class="card" id="ideaForm" hidden>
+    <textarea id="idea" placeholder="Wat is je idee?" required></textarea>
+    <div class="ctx" id="ctx"></div>
+    <button class="primary" id="save">Bewaren</button>
+    <div class="msg" id="msg" role="status"></div>
+  </form>
+
+  <form class="card" id="setupForm" hidden>
+    <label for="token">GitHub-token</label>
+    <ol>
+      <li>github.com → Settings → Developer settings → Fine-grained tokens → Generate new token</li>
+      <li>Repository access: alleen je <b>topics-…</b>-repo's</li>
+      <li>Permissions → Contents: <b>Read and write</b></li>
+    </ol>
+    <input id="token" type="password" autocomplete="off" placeholder="github_pat_…" required>
+    <p class="help">Het token blijft alleen in deze browser. Elke repo die met <b>topics-</b> begint, wordt een context.</p>
+    <button class="primary" id="connect">Verbinden</button>
+    <div class="msg" id="setMsg" role="status"></div>
+  </form>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const store = {
+  get(k){ try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
+  set(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
+const api = (path, opts = {}) => fetch('https://api.github.com' + path, {...opts, headers:{
+  Authorization:'Bearer ' + (opts.token || store.get('cfg').token), Accept:'application/vnd.github+json', 'X-GitHub-Api-Version':'2022-11-28'}});
+const b64 = s => { let bin = ''; for (const b of new TextEncoder().encode(s)) bin += String.fromCharCode(b); return btoa(bin); };
+const say = (el, text, kind) => { el.textContent = text; el.className = 'msg ' + (kind || ''); };
+
+function show(){
+  const cfg = store.get('cfg');
+  $('#setupForm').hidden = !!cfg; $('#ideaForm').hidden = !cfg; $('#setBtn').hidden = !cfg;
+  if (!cfg) return;
+  const last = store.get('ctx') || cfg.repos[0].ctx;
+  $('#ctx').innerHTML = cfg.repos.map(r => `<button type="button" data-ctx="${r.ctx}" class="${r.ctx === last ? 'on' : ''}">${r.ctx}</button>`).join('');
+  const draft = store.get('draft'); if (draft && !$('#idea').value) $('#idea').value = draft;
+}
+$('#ctx').addEventListener('click', e => {
+  const b = e.target.closest('[data-ctx]'); if (!b) return;
+  store.set('ctx', b.dataset.ctx); document.querySelectorAll('#ctx button').forEach(x => x.classList.toggle('on', x === b));
+});
+$('#idea').addEventListener('input', e => store.set('draft', e.target.value));
+$('#setBtn').addEventListener('click', () => { if (confirm('Token en contexten opnieuw instellen?')) { store.set('cfg', null); show(); } });
+
+$('#setupForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const token = $('#token').value.trim(); $('#connect').disabled = true; say($('#setMsg'), 'Verbinden…');
+  try {
+    const r = await api('/user/repos?per_page=100&sort=full_name', {token});
+    if (!r.ok) throw new Error(r.status === 401 ? 'Token ongeldig of verlopen.' : 'GitHub antwoordt ' + r.status);
+    const repos = (await r.json()).filter(x => /^topics-/.test(x.name) && x.permissions?.push)
+      .map(x => ({full:x.full_name, ctx:x.name.replace(/^topics-/, '')}));
+    if (!repos.length) throw new Error('Geen topics-…-repo met schrijfrecht voor dit token.');
+    store.set('cfg', {token, repos}); $('#token').value = ''; say($('#setMsg'), ''); show();
+  } catch (err) { say($('#setMsg'), err instanceof TypeError ? 'Geen verbinding met GitHub.' : err.message, 'bad'); }
+  $('#connect').disabled = false;
+});
+
+$('#ideaForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const text = $('#idea').value.trim(), cfg = store.get('cfg');
+  const repo = cfg.repos.find(r => r.ctx === (store.get('ctx') || cfg.repos[0].ctx)) || cfg.repos[0];
+  if (!text) return;
+  $('#save').disabled = true; say($('#msg'), 'Bewaren…');
+  const name = new Date().toISOString().replace(/[:.]/g, '-') + '.txt';
+  try {
+    const r = await api(`/repos/${repo.full}/contents/_inbox/${name}`, {method:'PUT',
+      body:JSON.stringify({message:'idee van gsm', content:b64(text + '\n')})});
+    if (!r.ok) throw new Error(r.status === 401 ? 'Token ongeldig of verlopen: open Instellingen.' : 'GitHub antwoordt ' + r.status + '. Je tekst blijft staan.');
+    $('#idea').value = ''; store.set('draft', ''); say($('#msg'), `Bewaard in ${repo.ctx}. Het dashboard toont het na de volgende sync.`, 'ok');
+  } catch (err) { say($('#msg'), err instanceof TypeError ? 'Geen verbinding. Je tekst blijft staan.' : err.message, 'bad'); }
+  $('#save').disabled = false;
+});
+show();
+</script>
+</body>
+</html>
