@@ -59,6 +59,9 @@ ol{padding-left:20px;margin:0 0 14px;color:var(--muted);font-size:14px}
     </ol>
     <input id="token" type="password" autocomplete="off" placeholder="github_pat_…" required>
     <p class="help">Het token blijft alleen in deze browser. Elke repo die met <b>topics-</b> begint, wordt een context.</p>
+    <label for="extra">Contexten zonder eigen repo (optioneel)</label>
+    <input id="extra" autocomplete="off" placeholder="bv. klant, gescheiden door komma's">
+    <p class="help">Een idee daarvoor komt in de <b>personal</b>-repo (of de eerste), met de context erbij. Zet er geen gevoelige klantdata in: het blijft in de git-geschiedenis.</p>
     <button class="primary" id="connect">Verbinden</button>
     <div class="msg" id="setMsg" role="status"></div>
   </form>
@@ -79,7 +82,8 @@ function show(){
   $('#setupForm').hidden = !!cfg; $('#ideaForm').hidden = !cfg; $('#setBtn').hidden = !cfg;
   if (!cfg) return;
   const last = store.get('ctx') || cfg.repos[0].ctx;
-  $('#ctx').innerHTML = cfg.repos.map(r => `<button type="button" data-ctx="${r.ctx}" class="${r.ctx === last ? 'on' : ''}">${r.ctx}</button>`).join('');
+  $('#ctx').innerHTML = cfg.repos.map(r => r.ctx).concat(cfg.extra || [])
+    .map(c => `<button type="button" data-ctx="${c}" class="${c === last ? 'on' : ''}">${c}</button>`).join('');
   const draft = store.get('draft'); if (draft && !$('#idea').value) $('#idea').value = draft;
 }
 $('#ctx').addEventListener('click', e => {
@@ -98,7 +102,8 @@ $('#setupForm').addEventListener('submit', async e => {
     const repos = (await r.json()).filter(x => /^topics-/.test(x.name) && x.permissions?.push)
       .map(x => ({full:x.full_name, ctx:x.name.replace(/^topics-/, '')}));
     if (!repos.length) throw new Error('Geen topics-…-repo met schrijfrecht voor dit token.');
-    store.set('cfg', {token, repos}); $('#token').value = ''; say($('#setMsg'), ''); show();
+    const extra = $('#extra').value.split(',').map(s => s.trim().toLowerCase()).filter(s => /^[\w-]+$/.test(s) && !repos.some(r => r.ctx === s));
+    store.set('cfg', {token, repos, extra}); $('#token').value = ''; say($('#setMsg'), ''); show();
   } catch (err) { say($('#setMsg'), err instanceof TypeError ? 'Geen verbinding met GitHub.' : err.message, 'bad'); }
   $('#connect').disabled = false;
 });
@@ -106,15 +111,18 @@ $('#setupForm').addEventListener('submit', async e => {
 $('#ideaForm').addEventListener('submit', async e => {
   e.preventDefault();
   const text = $('#idea').value.trim(), cfg = store.get('cfg');
-  const repo = cfg.repos.find(r => r.ctx === (store.get('ctx') || cfg.repos[0].ctx)) || cfg.repos[0];
+  // A context without its own repo goes to the personal repo, with a first line `context: <id>` the dashboard reads.
+  const ctx = store.get('ctx') || cfg.repos[0].ctx;
+  const own = cfg.repos.find(r => r.ctx === ctx);
+  const repo = own || cfg.repos.find(r => r.ctx === 'personal') || cfg.repos[0];
   if (!text) return;
   $('#save').disabled = true; say($('#msg'), 'Bewaren…');
   const name = new Date().toISOString().replace(/[:.]/g, '-') + '.txt';
   try {
     const r = await api(`/repos/${repo.full}/contents/_inbox/${name}`, {method:'PUT',
-      body:JSON.stringify({message:'idee van gsm', content:b64(text + '\n')})});
+      body:JSON.stringify({message:'idee van gsm', content:b64((own ? '' : `context: ${ctx}\n`) + text + '\n')})});
     if (!r.ok) throw new Error(r.status === 401 ? 'Token ongeldig of verlopen: open Instellingen.' : 'GitHub antwoordt ' + r.status + '. Je tekst blijft staan.');
-    $('#idea').value = ''; store.set('draft', ''); say($('#msg'), `Bewaard in ${repo.ctx}. Het dashboard toont het na de volgende sync.`, 'ok');
+    $('#idea').value = ''; store.set('draft', ''); say($('#msg'), `Bewaard voor ${ctx}. Het dashboard toont het na de volgende sync.`, 'ok');
   } catch (err) { say($('#msg'), err instanceof TypeError ? 'Geen verbinding. Je tekst blijft staan.' : err.message, 'bad'); }
   $('#save').disabled = false;
 });
