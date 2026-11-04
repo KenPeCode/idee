@@ -2,14 +2,14 @@
 <!-- Logs an idea from the phone into a topics sync repo: one file <repo>/_inbox/<time>.txt over the GitHub API.
      The dashboard lists them and hands them to /topic-idea. Static and secret-free: the token lives only in this
      browser (localStorage). Published as index.html of a public GitHub Pages repo; the source stays here. -->
-<html lang="nl">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#4f46e5">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>Idee loggen</title>
+<title>Log idea</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💡</text></svg>">
 <style>
 :root{--bg:#f6f7fb;--panel:#fff;--text:#1d2130;--muted:#6b7185;--border:#dfe2ec;--accent:#4f46e5;--on-accent:#fff;--ok:#15803d;--bad:#b91c1c;color-scheme:light}
@@ -41,12 +41,12 @@ ol{padding-left:20px;margin:0 0 14px;color:var(--muted);font-size:14px}
 </head>
 <body>
 <main>
-  <h1>💡 Idee loggen <button class="link" id="setBtn" type="button" hidden>Instellingen</button></h1>
+  <h1>💡 Log idea <button class="link" id="setBtn" type="button" hidden>Settings</button></h1>
 
   <form class="card" id="ideaForm" hidden>
-    <textarea id="idea" placeholder="Wat is je idee?" required></textarea>
+    <textarea id="idea" placeholder="What is your idea?" required></textarea>
     <div class="ctx" id="ctx"></div>
-    <button class="primary" id="save">Bewaren</button>
+    <button class="primary" id="save">Save</button>
     <div class="msg" id="msg" role="status"></div>
   </form>
 
@@ -54,15 +54,15 @@ ol{padding-left:20px;margin:0 0 14px;color:var(--muted);font-size:14px}
     <label for="token">GitHub-token</label>
     <ol>
       <li>github.com → Settings → Developer settings → Fine-grained tokens → Generate new token</li>
-      <li>Repository access: alleen je <b>topics-…</b>-repo's</li>
+      <li>Repository access: only your <b>topics-…</b> repos</li>
       <li>Permissions → Contents: <b>Read and write</b></li>
     </ol>
     <input id="token" type="password" autocomplete="off" placeholder="github_pat_…" required>
-    <p class="help">Het token blijft alleen in deze browser. Elke repo die met <b>topics-</b> begint, wordt een context.</p>
-    <label for="extra">Contexten zonder eigen repo (optioneel)</label>
-    <input id="extra" autocomplete="off" placeholder="bv. klant, gescheiden door komma's">
-    <p class="help">Een idee daarvoor komt in de <b>personal</b>-repo (of de eerste), met de context erbij. Zet er geen gevoelige klantdata in: het blijft in de git-geschiedenis.</p>
-    <button class="primary" id="connect">Verbinden</button>
+    <p class="help">The token stays only in this browser. Every repo starting with <b>topics-</b> becomes a context.</p>
+    <label for="extra">Contexts without their own repo (optional)</label>
+    <input id="extra" autocomplete="off" placeholder="e.g. client, separated by commas">
+    <p class="help">An idea for these goes into the <b>personal</b> repo (or the first one), with the context added. Do not put sensitive client data in it: it stays in the git history.</p>
+    <button class="primary" id="connect">Connect</button>
     <div class="msg" id="setMsg" role="status"></div>
   </form>
 </main>
@@ -91,20 +91,20 @@ $('#ctx').addEventListener('click', e => {
   store.set('ctx', b.dataset.ctx); document.querySelectorAll('#ctx button').forEach(x => x.classList.toggle('on', x === b));
 });
 $('#idea').addEventListener('input', e => store.set('draft', e.target.value));
-$('#setBtn').addEventListener('click', () => { if (confirm('Token en contexten opnieuw instellen?')) { store.set('cfg', null); show(); } });
+$('#setBtn').addEventListener('click', () => { if (confirm('Reset token and contexts?')) { store.set('cfg', null); show(); } });
 
 $('#setupForm').addEventListener('submit', async e => {
   e.preventDefault();
-  const token = $('#token').value.trim(); $('#connect').disabled = true; say($('#setMsg'), 'Verbinden…');
+  const token = $('#token').value.trim(); $('#connect').disabled = true; say($('#setMsg'), 'Connecting…');
   try {
     const r = await api('/user/repos?per_page=100&sort=full_name', {token});
-    if (!r.ok) throw new Error(r.status === 401 ? 'Token ongeldig of verlopen.' : 'GitHub antwoordt ' + r.status);
+    if (!r.ok) throw new Error(r.status === 401 ? 'Token invalid or expired.' : 'GitHub responded ' + r.status);
     const repos = (await r.json()).filter(x => /^topics-/.test(x.name) && x.permissions?.push)
       .map(x => ({full:x.full_name, ctx:x.name.replace(/^topics-/, '')}));
-    if (!repos.length) throw new Error('Geen topics-…-repo met schrijfrecht voor dit token.');
+    if (!repos.length) throw new Error('No topics-… repo with write access for this token.');
     const extra = $('#extra').value.split(',').map(s => s.trim().toLowerCase()).filter(s => /^[\w-]+$/.test(s) && !repos.some(r => r.ctx === s));
     store.set('cfg', {token, repos, extra}); $('#token').value = ''; say($('#setMsg'), ''); show();
-  } catch (err) { say($('#setMsg'), err instanceof TypeError ? 'Geen verbinding met GitHub.' : err.message, 'bad'); }
+  } catch (err) { say($('#setMsg'), err instanceof TypeError ? 'No connection to GitHub.' : err.message, 'bad'); }
   $('#connect').disabled = false;
 });
 
@@ -116,14 +116,14 @@ $('#ideaForm').addEventListener('submit', async e => {
   const own = cfg.repos.find(r => r.ctx === ctx);
   const repo = own || cfg.repos.find(r => r.ctx === 'personal') || cfg.repos[0];
   if (!text) return;
-  $('#save').disabled = true; say($('#msg'), 'Bewaren…');
+  $('#save').disabled = true; say($('#msg'), 'Saving…');
   const name = new Date().toISOString().replace(/[:.]/g, '-') + '.txt';
   try {
     const r = await api(`/repos/${repo.full}/contents/_inbox/${name}`, {method:'PUT',
-      body:JSON.stringify({message:'idee van gsm', content:b64((own ? '' : `context: ${ctx}\n`) + text + '\n')})});
-    if (!r.ok) throw new Error(r.status === 401 ? 'Token ongeldig of verlopen: open Instellingen.' : 'GitHub antwoordt ' + r.status + '. Je tekst blijft staan.');
-    $('#idea').value = ''; store.set('draft', ''); say($('#msg'), `Bewaard voor ${ctx}. Het dashboard toont het na de volgende sync.`, 'ok');
-  } catch (err) { say($('#msg'), err instanceof TypeError ? 'Geen verbinding. Je tekst blijft staan.' : err.message, 'bad'); }
+      body:JSON.stringify({message:'idea from phone', content:b64((own ? '' : `context: ${ctx}\n`) + text + '\n')})});
+    if (!r.ok) throw new Error(r.status === 401 ? 'Token invalid or expired: open Settings.' : 'GitHub responded ' + r.status + '. Your text is kept.');
+    $('#idea').value = ''; store.set('draft', ''); say($('#msg'), `Saved for ${ctx}. The dashboard shows it after the next sync.`, 'ok');
+  } catch (err) { say($('#msg'), err instanceof TypeError ? 'No connection. Your text is kept.' : err.message, 'bad'); }
   $('#save').disabled = false;
 });
 show();
